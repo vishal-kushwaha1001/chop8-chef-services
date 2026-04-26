@@ -2,6 +2,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import styles from "./Styles/About.module.css";
+import Footer from "../Components/Footer";
 
 /* ── Data ─────────────────────────────────────────────────── */
 const STACK = [
@@ -366,6 +367,7 @@ export default function About() {
           </div>
         </Reveal>
       </section>
+      <Footer/>
 
     </div>
   );

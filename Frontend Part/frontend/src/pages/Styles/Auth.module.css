@@ -4,7 +4,9 @@
   justify-content: center;
   align-items: center;
 
-  background: linear-gradient(135deg, #4facfe, #00c6ff);
+  background: linear-gradient(135deg,   #004e8f, #0f172a);
+    
+ 
 }
 
 .card {
@@ -18,10 +20,18 @@
   gap: 12px;
 
   box-shadow: 0 8px 20px rgba(0,0,0,0.2);
+  
 }
 
 .card h2 {
   text-align: center;
+  font-weight: 500;
+  background: linear-gradient(135deg, #4facfe, #004e8f);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+
+
+  
 }
 
 .card input,
@@ -35,8 +45,9 @@
   padding: 10px;
   border: none;
   border-radius: 8px;
+  outline: none;
 
-  background: linear-gradient(135deg, #4facfe, #00c6ff);
+  background: linear-gradient(135deg, #4facfe,#004e8f);
   color: white;
   font-weight: bold;
 

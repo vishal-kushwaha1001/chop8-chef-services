@@ -6,7 +6,7 @@ import { FaUserCircle } from "react-icons/fa";
 import Sidebar from "./Sidebar.jsx";
 import { getUser, logout } from "../services/AuthService";
 
-function RightNav() {
+function RightNav({ordersItem, isChef}) {
   const navigate = useNavigate();
   const [open, setOpen]   = useState(false);
   const [user, setUser]   = useState(getUser()); // reactive state
@@ -65,6 +65,8 @@ function RightNav() {
       </div>
 
       <Sidebar
+        ordersItem = {ordersItem}
+        isChef = {isChef}
         open={open}
         setOpen={setOpen}
         username={user?.name    || "Guest"}

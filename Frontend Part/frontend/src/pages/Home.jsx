@@ -5,6 +5,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { Link, useNavigate } from "react-router";
 import { API } from "../config";
 import styles from "./Styles/Home.module.css";
+import Footer from "../Components/Footer";
 
 /* ─── Static Data ───────────────────────────────────────── */
 const CATEGORIES = [
@@ -20,7 +21,7 @@ const CATEGORIES = [
 
 const SLIDES = [
   {
-    badge:      "12 Chefs Available Now",
+    badge:      "Chefs Available Now",
     title:      ["Restaurant", "Quality", "At Home"],
     accentLine: 2,
     desc:       "Book certified professional chefs for home cooking. From intimate dinners to grand celebrations.",
@@ -96,7 +97,7 @@ function HeroSlide({ slide, active }) {
     </div>
   );
 }
-
+// home card component
 /* ─── FeaturedChefCard ──────────────────────────────────── */
 function FeaturedChefCard({ chef, rating, isBusy, navigate }) {
   const available = chef.available !== false;
@@ -106,11 +107,12 @@ function FeaturedChefCard({ chef, rating, isBusy, navigate }) {
     <div className={styles.chefCard} onClick={() => navigate("/services")}>
       <div className={styles.ccImg}>
         {chef.photo ? (
-          <img
+          <div className= {styles.photoWrap }> <img
             src={chef.photo}
             alt={chef.name}
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
-          />
+            style={{ width: "100%", height: "100%", objectFit: "cover"  }}
+          /></div>
+         
         ) : (
           <span style={{ fontSize: "52px" }}>👨‍🍳</span>
         )}
@@ -154,7 +156,7 @@ function FeaturedChefSkeleton() {
     </div>
   );
 }
-
+//  leaderbord component
 /* ─── LeaderRow ─────────────────────────────────────────── */
 function LeaderRow({ chef, index, reviewCount }) {
   const score   = Number(chef.recommendScore || chef.avgRating || 0);
@@ -351,7 +353,7 @@ function Home() {
       <div className={styles.lbWrap}>
         <div className={styles.lbTop}>
           <div>
-            <div className={styles.lbHeading}>🏆 AI Chef Leaderboard</div>
+            <div className={styles.lbHeading}>🏆 Chef Leaderboard</div>
             <div className={styles.lbSub}>
               Ranked by ML Sentiment Analysis + Star Ratings · 83% model accuracy
             </div>
@@ -404,7 +406,7 @@ function Home() {
           {
             icon: "🛡️", h: "Safe Cancellation",
             p:   "Cancel anytime. Penalty only if cancelled within 3 hrs of check-in with advance paid.",
-            acc: "Zero penalty COD",
+            acc: "3hr Before Cancellation with Zero penalty",
           },
         ].map((card, i) => (
           <div key={i} className={styles.infoCard}>
@@ -442,17 +444,7 @@ function Home() {
 
       {/* ── FOOTER ── */}
       <div className={styles.divider} />
-      <footer className={styles.footer}>
-        <div className={styles.footerLogo}>CHOP8</div>
-        <div className={styles.footerLinks}>
-          {["About", "Privacy", "Terms", "Contact"].map(l => (
-            <Link key={l} to="/about" className={styles.footerLink}>{l}</Link>
-          ))}
-        </div>
-        <div className={styles.footerCopy}>
-          © 2026 CHOP8 · JSS Academy, Noida · Vinayak Prasad Singh
-        </div>
-      </footer>
+      <Footer/>
 
       <style>{`
         @keyframes shimmer {

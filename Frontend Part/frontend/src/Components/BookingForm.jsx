@@ -1,26 +1,103 @@
 // src/Components/BookingForm.jsx
+//
+// FIXES IN THIS VERSION:
+//
+// 1. CANCEL BUG — When PaymentGateway was opened after "Confirm Booking",
+//    clicking Cancel was calling the outer onClose (closing the whole
+//    BookingForm widget) instead of just dismissing the gateway.
+//    Fix: Added separate `showGateway` boolean state. Cancel inside the
+//    gateway now sets showGateway=false and shows a pay-later warning,
+//    keeping the pending booking intact. The outer onClose is never called
+//    from inside the gateway.
+//
+// 2. JPA ERROR MESSAGE — "Query did not return a unique result: 2 results
+//    were returned" is a raw Spring IncorrectResultSizeDataAccessException.
+//    It means the backend has a data integrity issue (duplicate rows for
+//    the same booking or user query). This is a BACKEND bug to fix in the
+//    Spring service layer. On the frontend, we now detect this class of
+//    error and show a clean, user-friendly message instead of the raw
+//    exception text.
+//
+//    Backend fix needed: In your Spring service, the query that does
+//    findBy...() should use findFirst...() or add LIMIT 1 to prevent
+//    this exception when duplicates exist in the DB.
+//
 import React, { useState } from "react";
 import { API, calcPriceBreakdown, PAYMENT } from "../config";
 import PaymentGateway from "./PaymentGateway";
+import styles from "./css/BookingForm.module.css";
 
+/* ── Helpers ─────────────────────────────────────────────── */
+function calcDuration(a, b) {
+  try {
+    const [h1, m1] = a.split(":").map(Number);
+    const [h2, m2] = b.split(":").map(Number);
+    const mins = (h2 * 60 + m2) - (h1 * 60 + m1);
+    if (mins <= 0) return null;
+    const h = Math.floor(mins / 60), m = mins % 60;
+    return m === 0 ? `${h} hrs` : `${h}h ${m}m`;
+  } catch { return null; }
+}
+
+/* Detect raw Spring/JPA exception messages and return a clean version */
+function cleanServerError(raw) {
+  if (!raw) return "Booking failed. Please try again.";
+  const lower = raw.toLowerCase();
+  if (
+    lower.includes("unique result") ||
+    lower.includes("query did not") ||
+    lower.includes("incorrectresultsizedata") ||
+    lower.includes("2 results were returned") ||
+    lower.includes("more than one result")
+  ) {
+    return "A server error occurred with your booking. Please try a different date or time slot, or contact support if this persists.";
+  }
+  return raw;
+}
+
+/* ── Price Row ───────────────────────────────────────────── */
+function PRow({ label, value, bold, blue, orange, green, small }) {
+  const valClass = blue
+    ? styles.pValBlue
+    : orange
+    ? styles.pValOrange
+    : green
+    ? styles.pValGreen
+    : styles.pValDefault;
+  const rowClass = small
+    ? styles.pRowSmall
+    : bold
+    ? styles.pRowBold
+    : styles.pRow;
+  return (
+    <div className={rowClass}>
+      <span>{label}</span>
+      <span className={bold ? valClass : ""}>{value}</span>
+    </div>
+  );
+}
+
+/* ── BookingForm ─────────────────────────────────────────── */
 function BookingForm({ chef, onClose, onBooked, alreadyBooked }) {
-  const [date,         setDate]         = useState("");
-  const [timeIn,       setTimeIn]       = useState("");
-  const [timeOut,      setTimeOut]      = useState("");
-  const [paymentMode,  setPaymentMode]  = useState("");
-  const [busy,         setBusy]         = useState(false);
-  const [bookedSlots,  setBookedSlots]  = useState([]);   // [{timeIn, timeOut}] already booked
-  const [loading,      setLoading]      = useState(false);
-  const [error,        setError]        = useState("");
+  const [date,        setDate]        = useState("");
+  const [timeIn,      setTimeIn]      = useState("");
+  const [timeOut,     setTimeOut]     = useState("");
+  const [paymentMode, setPaymentMode] = useState("");
+  const [busy,        setBusy]        = useState(false);
+  const [bookedSlots, setBookedSlots] = useState([]);
+  const [loading,     setLoading]     = useState(false);
+  const [error,       setError]       = useState("");
 
-  // Holds the PENDING booking while PaymentGateway is open
-  const [pendingBooking,  setPendingBooking]  = useState(null);
-  // Shows warning if user tries to close PaymentGateway without paying
-  const [showPayWarning,  setShowPayWarning]  = useState(false);
+  // FIX: Split into two states.
+  // pendingBooking = the booking object from the API.
+  // showGateway    = whether the PaymentGateway is currently visible.
+  // This lets Cancel in the gateway hide it without killing the form.
+  const [pendingBooking, setPendingBooking] = useState(null);
+  const [showGateway,    setShowGateway]    = useState(false);
+  const [showPayWarning, setShowPayWarning] = useState(false);
 
   const price = chef?.pricePerDay || 0;
 
-  // Detect emergency: same day + timeIn within EMERGENCY_THRESHOLD_HRS from now
   const isEmergency = (() => {
     if (!date || !timeIn) return false;
     try {
@@ -35,75 +112,43 @@ function BookingForm({ chef, onClose, onBooked, alreadyBooked }) {
 
   const breakdown = calcPriceBreakdown(price, isEmergency);
 
-  // ── Already booked warning ────────────────────────────
+  /* ── Already booked guard ── */
   if (alreadyBooked) {
     return (
-      <div style={{ ...formWrap, background: "#fff3e0", border: "1px solid #ffcc80" }}>
-        <div style={{ fontSize: "22px", marginBottom: "8px" }}>⚠️</div>
-        <div style={{ color: "#e65100", fontWeight: 600, fontSize: "14px", marginBottom: "4px" }}>
+      <div className={styles.alreadyBox}>
+        <span className={styles.alreadyIcon}>⚠️</span>
+        <p className={styles.alreadyTitle}>
           You already have a booking with {chef.name}
-        </div>
-        <div style={{ color: "#bf360c", fontSize: "13px", marginBottom: "4px" }}>
+        </p>
+        <p className={styles.alreadyDesc}>
           On {alreadyBooked.date}
           {alreadyBooked.timeIn && ` · ${alreadyBooked.timeIn} – ${alreadyBooked.timeOut}`}
-        </div>
-        <div style={{ fontSize: "13px", color: "#777", marginBottom: "12px" }}>
-          Please cancel your existing booking first.
-        </div>
-        <button onClick={onClose} style={cancelBtn}>Close</button>
+          <br />Please cancel your existing booking first.
+        </p>
+        <button onClick={onClose} className={styles.btnCloseSmall}>Close</button>
       </div>
     );
   }
 
-  // ── PaymentGateway screen (ONLINE mode after booking created) ──
-  if (pendingBooking) {
+  /* ── PaymentGateway screen ──────────────────────────────────
+     FIX: Only shown when pendingBooking exists AND showGateway=true.
+     The gateway's onClose now sets showGateway=false (NOT outer onClose).
+     This means Cancel inside the gateway hides it but keeps the pending
+     booking state alive, showing a pay-later warning instead.
+  ── */
+  if (pendingBooking && showGateway) {
     return (
       <div style={{ width: "100%", position: "relative" }}>
-
-        {/* Warning overlay if user tries to skip payment */}
-        {showPayWarning && (
-          <div style={{
-            position: "absolute", top: 0, left: 0, right: 0, zIndex: 10,
-            background: "#fff3e0", border: "1px solid #ffcc80",
-            borderRadius: "10px", padding: "14px 16px", margin: "0 0 10px",
-          }}>
-            <div style={{ fontWeight: 700, color: "#e65100", fontSize: "13px", marginBottom: "6px" }}>
-              ⚠️ Booking is not confirmed yet!
-            </div>
-            <div style={{ fontSize: "12px", color: "#bf360c", marginBottom: "10px" }}>
-              Your booking is saved as <strong>PENDING</strong> but the token will only be generated
-              after you complete the advance payment. Without payment, the chef is not notified.
-            </div>
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button
-                onClick={() => setShowPayWarning(false)}
-                style={{ flex: 1, padding: "8px", background: "linear-gradient(135deg,#f7971e,#ffd200)", color: "#3e2000", border: "none", borderRadius: "8px", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}
-              >
-                💳 Complete Payment
-              </button>
-              <button
-                onClick={() => {
-                  // Pass pending booking to parent — user can pay later from Orders page
-                  if (onBooked) onBooked(pendingBooking);
-                  if (onClose)  onClose();
-                }}
-                style={{ padding: "8px 14px", background: "#eee", border: "none", borderRadius: "8px", fontSize: "12px", cursor: "pointer", color: "#666" }}
-              >
-                Pay Later
-              </button>
-            </div>
-          </div>
-        )}
-
         <PaymentGateway
           booking={pendingBooking}
           paymentType="ADVANCE"
           onClose={() => {
-            // User clicked cancel in PaymentGateway — show warning instead of silently closing
+            // FIX: Don't call outer onClose — just hide the gateway
+            // and let the user decide to pay later or re-open.
+            setShowGateway(false);
             setShowPayWarning(true);
           }}
           onSuccess={receipt => {
-            // ✅ Advance paid — token generated — booking is now CONFIRMED
             const confirmedBooking = {
               ...pendingBooking,
               tokenId:              receipt.tokenId,
@@ -120,58 +165,101 @@ function BookingForm({ chef, onClose, onBooked, alreadyBooked }) {
     );
   }
 
-  // ── Date busy check ───────────────────────────────────
+  /* ── Pay-later warning (gateway was dismissed without paying) ── */
+  if (pendingBooking && !showGateway && showPayWarning) {
+    return (
+      <div className={styles.formWrap}>
+        <div className={styles.payWarning}>
+          <div className={styles.payWarningTitle}>⚠️ Booking saved — payment pending</div>
+          <p className={styles.payWarningDesc}>
+            Your booking with <strong>{chef.name}</strong> on <strong>{pendingBooking.date}</strong> is saved
+            as <strong>PENDING</strong>. The token is generated only after advance payment.
+            You can pay now or later from the Orders page.
+          </p>
+          <div className={styles.payWarningBtns}>
+            <button
+              onClick={() => { setShowPayWarning(false); setShowGateway(true); }}
+              className={styles.btnPayNow}
+            >
+              💳 Pay ₹{pendingBooking.advanceAmount || breakdown.advance} Now
+            </button>
+            <button
+              onClick={() => {
+                if (onBooked) onBooked(pendingBooking);
+                if (onClose)  onClose();
+              }}
+              className={styles.btnPayLater}
+            >
+              Pay Later (Orders page)
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* ── Date busy check ── */
   const handleDateChange = async (e) => {
     const val = e.target.value;
-    setDate(val); setError(""); setBusy(false);
+    setDate(val);
+    setError("");
+    setBusy(false);
+    setBookedSlots([]);
     if (!val) return;
     try {
       const res  = await fetch(`${API.bookings}/chef/${chef.id}/busy?date=${val}`);
       const data = await res.json();
-      // Store the booked slots (not just busy=true/false)
-      // busy=true just means SOME slot exists — we check actual overlap on submit
       setBookedSlots(data.bookedSlots || []);
       setBusy(data.busy === true);
-      // Don't block the whole day — just show info message about existing bookings
       if (data.busy) {
         const slotList = (data.bookedSlots || [])
           .map(s => `${s.timeIn} – ${s.timeOut}`)
           .join(", ");
-        setError(`${chef.name} has bookings on ${val} during: ${slotList}. Choose a different time slot.`);
+        setError(
+          `${chef.name} has existing bookings on ${val} during: ${slotList}. Please choose a different time slot.`
+        );
       }
-    } catch { /* ignore */ }
+    } catch { /* network error on busy check — ignore, don't block booking */ }
   };
 
   const handleTimeOutChange = (e) => {
     const val = e.target.value;
-    setTimeOut(val); setError("");
-    if (timeIn && val && val <= timeIn) setError("Check-out must be after check-in.");
+    setTimeOut(val);
+    setError("");
+    if (timeIn && val && val <= timeIn) {
+      setError("Check-out must be after check-in.");
+    }
   };
 
-  // ── Submit booking ────────────────────────────────────
+  /* ── Submit ── */
   const handleSubmit = async () => {
-    const loggedUser = JSON.parse(localStorage.getItem("chop8_user"));
-    if (!loggedUser)        { setError("Please login to book."); return; }
-    if (!date)              { setError("Please select a date."); return; }
-    if (!timeIn)            { setError("Please select a check-in time."); return; }
-    if (!timeOut)           { setError("Please select a check-out time."); return; }
-    if (timeOut <= timeIn)  { setError("Check-out must be after check-in."); return; }
-    // Check if selected time slot overlaps with any existing booked slot
-    const hasOverlap = bookedSlots.some(slot => {
-      // Overlap: newIn < existingOut AND newOut > existingIn
-      return timeIn < slot.timeOut && timeOut > slot.timeIn;
-    });
+    const loggedUser = JSON.parse(localStorage.getItem("chop8_user") || "null");
+    if (!loggedUser)       { setError("Please login to book."); return; }
+    if (!date)             { setError("Please select a date."); return; }
+    if (!timeIn)           { setError("Please select a check-in time."); return; }
+    if (!timeOut)          { setError("Please select a check-out time."); return; }
+    if (timeOut <= timeIn) { setError("Check-out must be after check-in."); return; }
+
+    // Client-side overlap check
+    const hasOverlap = bookedSlots.some(
+      slot => timeIn < slot.timeOut && timeOut > slot.timeIn
+    );
     if (hasOverlap) {
       const conflicting = bookedSlots
         .filter(s => timeIn < s.timeOut && timeOut > s.timeIn)
         .map(s => `${s.timeIn} – ${s.timeOut}`)
         .join(", ");
-      setError(`Time conflict! ${chef.name} is already booked during ${conflicting} on ${date}. Please choose a different time.`);
+      setError(
+        `Time conflict! ${chef.name} is already booked during ${conflicting} on ${date}. Please choose a different time.`
+      );
       return;
     }
-    if (!paymentMode)       { setError("Please select a payment method."); return; }
 
-    setLoading(true); setError("");
+    if (!paymentMode) { setError("Please select a payment method."); return; }
+
+    setLoading(true);
+    setError("");
+
     try {
       const res = await fetch(API.book, {
         method:  "POST",
@@ -182,186 +270,202 @@ function BookingForm({ chef, onClose, onBooked, alreadyBooked }) {
           user: { id: loggedUser.userId },
         }),
       });
+
       const data = await res.json();
-      if (!res.ok) { setError(data.error || "Booking failed."); return; }
+
+      if (!res.ok) {
+        // FIX: clean raw Spring/JPA exceptions before showing to user
+        setError(cleanServerError(data.error || data.message || ""));
+        return;
+      }
 
       if (paymentMode === "ONLINE") {
-        // Booking is PENDING — open PaymentGateway immediately
-        // Token will only be generated AFTER advance payment succeeds
+        // FIX: set both states together atomically
         setPendingBooking(data);
+        setShowPayWarning(false);
+        setShowGateway(true);
       } else {
-        // COD — token assigned immediately, booking confirmed
         if (onBooked) onBooked(data);
         if (onClose)  onClose();
       }
     } catch {
-      setError("Network error. Please try again.");
+      setError("Network error. Please check your connection and try again.");
     } finally {
       setLoading(false);
     }
   };
 
   const timeInvalid = timeIn && timeOut && timeOut <= timeIn;
-  const canConfirm  = !loading && !timeInvalid && paymentMode;
+  const canConfirm  = !loading && !timeInvalid && !!paymentMode;
+  const dur         = timeIn && timeOut && !timeInvalid ? calcDuration(timeIn, timeOut) : null;
 
-  // ── Booking form ──────────────────────────────────────
+  /* ── Render ── */
   return (
-    <div style={formWrap}>
-      <h4 style={{ margin: "0 0 12px", color: "#1e3c72" }}>Book {chef.name}</h4>
-      {error && <div style={errBox}>{error}</div>}
+    <div className={styles.formWrap}>
+
+      <h4 className={styles.formTitle}>Book {chef.name}</h4>
+
+      {error && <div className={styles.errBox}>{error}</div>}
 
       {/* Date */}
-      <div style={fg}>
-        <label style={lbl}>📅 Select Date</label>
-        <input type="date" min={new Date().toISOString().split("T")[0]}
-          style={{ ...inp, borderColor: "#ccc", background: "white" }}
-          onChange={handleDateChange} />
+      <div className={styles.fg}>
+        <label className={styles.lbl}>📅 Select Date</label>
+        <input
+          type="date"
+          min={new Date().toISOString().split("T")[0]}
+          className={styles.inp}
+          onChange={handleDateChange}
+        />
       </div>
 
-      {/* Time */}
-      <div style={{ display: "flex", gap: "10px" }}>
-        <div style={{ ...fg, flex: 1 }}>
-          <label style={lbl}>🕐 Check-In</label>
-          <input type="time" style={inp} value={timeIn}
-            onChange={e => { setTimeIn(e.target.value); setError(""); }} />
+      {/* Times */}
+      <div className={styles.timeRow}>
+        <div className={styles.timeField}>
+          <label className={styles.lbl}>🕐 Check-In</label>
+          <input
+            type="time"
+            className={styles.inp}
+            value={timeIn}
+            onChange={e => { setTimeIn(e.target.value); setError(""); }}
+          />
         </div>
-        <div style={{ ...fg, flex: 1 }}>
-          <label style={lbl}>🕔 Check-Out</label>
-          <input type="time" style={{ ...inp, borderColor: timeInvalid ? "#e53935" : "#ccc" }}
-            value={timeOut} onChange={handleTimeOutChange} />
+        <div className={styles.timeField}>
+          <label className={styles.lbl}>🕔 Check-Out</label>
+          <input
+            type="time"
+            className={timeInvalid ? styles.inpError : styles.inp}
+            value={timeOut}
+            onChange={handleTimeOutChange}
+          />
         </div>
       </div>
 
-      {timeIn && timeOut && !timeInvalid && (
-        <div style={badge("#e8f5e9","#a5d6a7","#2e7d32")}>✅ {calcDuration(timeIn, timeOut)} · {timeIn} – {timeOut}</div>
+      {/* Status badges */}
+      {dur && (
+        <div className={styles.badgeGreen}>✅ {dur} · {timeIn} – {timeOut}</div>
       )}
-      {date && !busy && <div style={badge("#e8f5e9","#a5d6a7","#2e7d32")}>✅ {chef.name} is free on {date}</div>}
-      {date && busy  && <div style={badge("#e3f2fd","#90caf9","#0d47a1")}>🔵 Already booked. Choose another date.</div>}
+      {date && !busy && (
+        <div className={styles.badgeGreen}>✅ {chef.name} is free on {date}</div>
+      )}
+      {date && busy && (
+        <div className={styles.badgeBlue}>
+          ℹ️ {chef.name} has existing bookings today — choose a non-overlapping time slot.
+        </div>
+      )}
 
       {/* Price breakdown */}
-      <div style={priceBox}>
-        <div style={priceTitle}>
+      <div className={styles.priceBox}>
+        <div className={styles.priceTitle}>
           💰 Price Breakdown
           {isEmergency && (
-            <span style={{ marginLeft:"8px", background:"#b71c1c", color:"white", fontSize:"10px", padding:"2px 8px", borderRadius:"10px", fontWeight:700, letterSpacing:"0.5px" }}>
-              🚨 EMERGENCY
-            </span>
+            <span className={styles.emergencyBadge}>🚨 Emergency</span>
           )}
         </div>
+
         {isEmergency ? (
           <>
-            <PRow label="Base Chef Charges"        value={`₹${breakdown.baseChef}`} />
-            <PRow label={`Emergency Surcharge (×${PAYMENT.EMERGENCY_MULTIPLIER})`} value={`+₹${breakdown.surcharge}`} bold orange />
-            <PRow label="Effective Chef Charges"   value={`₹${breakdown.chef}`} bold />
+            <PRow label="Base Chef Charges"
+                  value={`₹${breakdown.baseChef}`} />
+            <PRow label={`Emergency Surcharge (×${PAYMENT.EMERGENCY_MULTIPLIER})`}
+                  value={`+₹${breakdown.surcharge}`} bold orange />
+            <PRow label="Effective Chef Charges"
+                  value={`₹${breakdown.chef}`} bold />
           </>
         ) : (
-          <PRow label="Chef Charges"               value={`₹${breakdown.chef}`} />
+          <PRow label="Chef Charges" value={`₹${breakdown.chef}`} />
         )}
-        <PRow label="Platform Fee"                 value={`₹${breakdown.platform}`} />
-        <PRow label="GST (3%)"                     value={`₹${breakdown.gst}`} small />
-        <div style={priceDivider} />
-        <PRow label="Total Amount"                 value={`₹${breakdown.total}`}   bold blue />
-        <div style={priceDivider} />
-        <PRow label="Advance Now (30%)"            value={`₹${breakdown.advance}`} bold orange />
-        <PRow label="After Service (70%)"          value={`₹${breakdown.final}`}   bold green />
+
+        <PRow label="Platform Fee" value={`₹${breakdown.platform}`} />
+        <PRow label="GST (3%)"     value={`₹${breakdown.gst}`}      small />
+        <hr className={styles.priceDivider} />
+        <PRow label="Total Amount"        value={`₹${breakdown.total}`}   bold blue />
+        <hr className={styles.priceDivider} />
+        <PRow label="Advance Now (30%)"   value={`₹${breakdown.advance}`} bold orange />
+        <PRow label="After Service (70%)" value={`₹${breakdown.final}`}   bold green />
       </div>
 
       {/* Emergency warning */}
       {isEmergency && (
-        <div style={{ background:"#ffebee", border:"2px solid #e53935", borderRadius:"10px", padding:"12px 14px" }}>
-          <div style={{ fontWeight:700, color:"#b71c1c", fontSize:"13px", marginBottom:"4px" }}>
-            🚨 Emergency Booking Detected
-          </div>
-          <div style={{ fontSize:"12px", color:"#c62828", lineHeight:1.5 }}>
-            This booking is within <strong>{PAYMENT.EMERGENCY_THRESHOLD_HRS} hours</strong> of the start time.
-            Chef charges are <strong>×{PAYMENT.EMERGENCY_MULTIPLIER}</strong> (₹{breakdown.baseChef} → ₹{breakdown.chef}).
-            The token will be marked as <strong>Emergency Chef Booking</strong>.
-          </div>
+        <div className={styles.emergencyWarn}>
+          <div className={styles.emergencyWarnTitle}>🚨 Emergency Booking Detected</div>
+          <p className={styles.emergencyWarnDesc}>
+            This booking is within <strong>{PAYMENT.EMERGENCY_THRESHOLD_HRS} hours</strong> of
+            start. Chef charges are <strong>×{PAYMENT.EMERGENCY_MULTIPLIER}</strong>{" "}
+            (₹{breakdown.baseChef} → ₹{breakdown.chef}). Token will be marked as Emergency.
+          </p>
         </div>
       )}
 
       {/* Cancellation policy */}
-      <div style={badge("#fff8e1","#ffe082","#7a5c00")}>
+      <div className={styles.badgeYellow}>
         ⚠️ Cancellation disabled {PAYMENT.CANCEL_CUTOFF_HRS} hours before booking start time.
       </div>
 
-      {/* Payment mode selector */}
-      <div style={fg}>
-        <label style={lbl}>💳 Payment Method</label>
-        <div style={{ display: "flex", gap: "10px", marginTop: "4px" }}>
+      {/* Payment mode */}
+      <div className={styles.fg}>
+        <label className={styles.lbl}>💳 Payment Method</label>
+        <div className={styles.modeRow}>
 
-          <button type="button" onClick={() => { setPaymentMode("COD"); setError(""); }}
-            style={{ ...modeBtn, border: `2px solid ${paymentMode === "COD" ? "#2e7d32" : "#ddd"}`, background: paymentMode === "COD" ? "#e8f5e9" : "white" }}>
-            <div style={{ fontSize: "18px", marginBottom: "3px" }}>💵</div>
-            <div style={{ fontWeight: 700, fontSize: "12px", color: paymentMode === "COD" ? "#2e7d32" : "#333" }}>Cash on Delivery</div>
-            <div style={{ fontSize: "10px", color: "#888", marginTop: "2px" }}>Full ₹{breakdown.total} in cash</div>
+          <button
+            type="button"
+            onClick={() => { setPaymentMode("COD"); setError(""); }}
+            className={paymentMode === "COD" ? styles.modeBtnActive : styles.modeBtn}
+          >
+            <span className={styles.modeIcon}>💵</span>
+            <div className={paymentMode === "COD" ? styles.modeLabelActive : styles.modeLabel}>
+              Cash on Delivery
+            </div>
+            <div className={styles.modeHint}>Full ₹{breakdown.total} in cash</div>
           </button>
 
-          <button type="button" onClick={() => { setPaymentMode("ONLINE"); setError(""); }}
-            style={{ ...modeBtn, border: `2px solid ${paymentMode === "ONLINE" ? "#1e3c72" : "#ddd"}`, background: paymentMode === "ONLINE" ? "#e3f2fd" : "white" }}>
-            <div style={{ fontSize: "18px", marginBottom: "3px" }}>💳</div>
-            <div style={{ fontWeight: 700, fontSize: "12px", color: paymentMode === "ONLINE" ? "#1e3c72" : "#333" }}>Online Payment</div>
-            <div style={{ fontSize: "10px", color: "#888", marginTop: "2px" }}>Pay ₹{breakdown.advance} advance now</div>
+          <button
+            type="button"
+            onClick={() => { setPaymentMode("ONLINE"); setError(""); }}
+            className={paymentMode === "ONLINE" ? styles.modeBtnActive : styles.modeBtn}
+          >
+            <span className={styles.modeIcon}>💳</span>
+            <div className={paymentMode === "ONLINE" ? styles.modeLabelActive : styles.modeLabel}>
+              Online Payment
+            </div>
+            <div className={styles.modeHint}>Pay ₹{breakdown.advance} advance now</div>
           </button>
 
         </div>
       </div>
 
-      {/* Mode-specific notes */}
+      {/* Mode notes */}
       {paymentMode === "ONLINE" && (
-        <div style={badge("#e3f2fd","#90caf9","#0d47a1")}>
-          💳 Pay <strong>₹{breakdown.advance}</strong> advance now → <strong>token generated</strong> → pay <strong>₹{breakdown.final}</strong> after service.
+        <div className={styles.badgeBlue}>
+          💳 Pay <strong>₹{breakdown.advance}</strong> advance now →{" "}
+          <strong>token generated</strong> → pay <strong>₹{breakdown.final}</strong> after service.
         </div>
       )}
       {paymentMode === "COD" && (
-        <div style={badge("#e8f5e9","#a5d6a7","#2e7d32")}>
+        <div className={styles.badgeGreen}>
           ✅ Token generated immediately. Pay <strong>₹{breakdown.total}</strong> cash when chef arrives.
         </div>
       )}
 
-      {/* Confirm button */}
-      <div style={{ display: "flex", gap: "8px" }}>
-        <button onClick={handleSubmit} disabled={!canConfirm}
-          style={{ flex: 1, padding: "11px", background: canConfirm ? "linear-gradient(135deg,#4facfe,#00c6ff)" : "#ccc", color: "white", border: "none", borderRadius: "8px", fontWeight: 600, cursor: canConfirm ? "pointer" : "not-allowed", fontSize: "14px" }}>
+      {/* Actions */}
+      <div className={styles.actionRow}>
+        <button
+          onClick={handleSubmit}
+          disabled={!canConfirm}
+          className={canConfirm ? styles.btnConfirm : styles.btnConfirmDisabled}
+        >
           {loading
-            ? "Processing..."
+            ? "Processing…"
             : paymentMode === "ONLINE"
             ? `Continue to Pay ₹${breakdown.advance} →`
             : paymentMode === "COD"
-            ? `Confirm Booking (COD)`
+            ? "Confirm Booking (COD)"
             : "Confirm Booking"}
         </button>
-        <button onClick={onClose} style={cancelBtn}>Cancel</button>
+        <button onClick={onClose} className={styles.btnCancel}>Cancel</button>
       </div>
+
     </div>
   );
 }
-
-// ── Helpers ───────────────────────────────────────────────
-function PRow({ label, value, bold, blue, orange, green, small }) {
-  const color = blue ? "#1e3c72" : orange ? "#e65100" : green ? "#2e7d32" : "#555";
-  return (
-    <div style={{ display: "flex", justifyContent: "space-between", fontSize: small ? "11px" : "13px", color: bold ? color : "#666", fontWeight: bold ? 700 : 400, padding: "2px 0" }}>
-      <span>{label}</span><span>{value}</span>
-    </div>
-  );
-}
-function calcDuration(a, b) {
-  const [h1,m1]=a.split(":").map(Number),[h2,m2]=b.split(":").map(Number);
-  const mins=(h2*60+m2)-(h1*60+m1),h=Math.floor(mins/60),m=mins%60;
-  return m===0?`${h} hrs`:`${h}h ${m}m`;
-}
-
-const badge      = (bg,bdr,color)=>({background:bg,border:`1px solid ${bdr}`,borderRadius:"8px",padding:"8px 12px",fontSize:"12px",color});
-const formWrap   = {width:"100%",padding:"18px",border:"1px solid #b3d9ff",borderRadius:"12px",marginTop:"12px",background:"#f0f8ff",display:"flex",flexDirection:"column",gap:"12px"};
-const fg         = {display:"flex",flexDirection:"column",gap:"4px"};
-const lbl        = {fontSize:"12px",color:"#555",fontWeight:500};
-const inp        = {width:"100%",padding:"8px 10px",borderRadius:"8px",border:"1px solid #ccc",fontSize:"14px",boxSizing:"border-box"};
-const errBox     = {color:"#c00",background:"#fff0f0",padding:"8px 12px",borderRadius:"8px",fontSize:"13px",border:"1px solid #fcc"};
-const cancelBtn  = {padding:"10px 16px",background:"#eee",border:"none",borderRadius:"8px",cursor:"pointer",fontSize:"14px"};
-const modeBtn    = {flex:1,padding:"12px 8px",borderRadius:"10px",cursor:"pointer",transition:"all 0.2s",textAlign:"center"};
-const priceBox   = {background:"white",border:"1px solid #e0eafc",borderRadius:"10px",padding:"12px 14px",display:"flex",flexDirection:"column",gap:"3px"};
-const priceTitle = {fontWeight:700,fontSize:"12px",color:"#1e3c72",marginBottom:"6px"};
-const priceDivider={borderTop:"1px dashed #ddd",margin:"4px 0"};
 
 export default BookingForm;

@@ -13,7 +13,9 @@ import Orders           from "./pages/Orders.jsx";
 import ChefOrders       from "./pages/ChefOrders.jsx";
 import Payments         from "./pages/Payments.jsx";
 import RecommendedChefs from "./pages/RecommendedChefs.jsx"; 
-import ContactUs from "./pages/ContactUs.jsx"; // ← ADD THIS LINE
+import ContactUs from "./pages/ContactUs.jsx"; 
+import Privacy from "./pages/Privacy.jsx";
+import Terms from "./pages/Terms.jsx";
 
 const router = createBrowserRouter(
   createRoutesFromElements(
@@ -28,7 +30,9 @@ const router = createBrowserRouter(
       <Route path="/chef-orders"   element={<ChefOrders />} />
       <Route path="/profile"       element={<Profile />} />
       <Route path="/payments"      element={<Payments />} />
-      <Route path="/recommended"   element={<RecommendedChefs />} />  {/* ← ADD THIS LINE */}
+      <Route path="/recommended"   element={<RecommendedChefs />} /> 
+      <Route path="/privacy"       element ={<Privacy/>} />
+      <Route path="/terms"         element ={<Terms/>} />
       <Route path="*"              element={<h1>Page Not Found</h1>}/>
     </Route>
   )
