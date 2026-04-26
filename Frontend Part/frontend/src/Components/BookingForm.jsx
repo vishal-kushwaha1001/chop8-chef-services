@@ -398,7 +398,7 @@ function BookingForm({ chef, onClose, onBooked, alreadyBooked }) {
 
       {/* Cancellation policy */}
       <div className={styles.badgeYellow}>
-        ⚠️ Cancellation disabled {PAYMENT.CANCEL_CUTOFF_HRS} hours before booking start time.
+        ⚠️ Cancellation charges will apply if the booking is canceled {PAYMENT.CANCEL_CUTOFF_HRS}  hours before the scheduled time
       </div>
 
       {/* Payment mode */}

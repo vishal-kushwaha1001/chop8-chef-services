@@ -1,7 +1,9 @@
-// src/Components/Sidebar.jsx
-import React from "react";
+
+import React, { useState, useEffect } from "react";
 import styles from "./css/Sidebar.module.css";
 import { Link } from "react-router";
+import { getUser } from "../services/AuthService";
+import { API } from "../config";
 import {
   FaHome, FaList, FaShoppingCart,
   FaClipboardList, FaCreditCard, FaUser,
@@ -10,14 +12,50 @@ import { IoIosHelpCircle } from "react-icons/io";
 
 function Sidebar({
   open, setOpen, onLogout, ordersItem, isChef,
-  username = "Customer Name",
-  mobileN0 = "+91-0000000000",
-  address  = "No address",
-  email    = "xyz@gmail.com",
-  photo    = "",          // ← NEW: base64 or URL profile photo
-  avgRating = 0,
+  username    = "Customer Name",
+  mobileN0    = "+91-0000000000",
+  address     = "No address",
+  email       = "xyz@gmail.com",
+  photo       = "",   // prop from parent (may be empty — sidebar fetches it anyway)
+  avgRating   = 0,
   ratingCount = 0,
 }) {
+  // Live photo fetched from API — overrides empty prop
+  const [livePhoto,       setLivePhoto]       = useState(photo || "");
+  const [liveAvgRating,   setLiveAvgRating]   = useState(avgRating   || 0);
+  const [liveRatingCount, setLiveRatingCount] = useState(ratingCount || 0);
+
+  /* ── Fetch live profile from API ── */
+  const fetchProfile = async () => {
+    const user = getUser();
+    if (!user) return;
+    try {
+      const res = await fetch(`${API.profile}/${user.role}/${user.userId}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.photo       !== undefined) setLivePhoto(data.photo       || "");
+      if (data.avgRating   !== undefined) setLiveAvgRating(data.avgRating   || 0);
+      if (data.ratingCount !== undefined) setLiveRatingCount(data.ratingCount || 0);
+    } catch { /* ignore — keep whatever is in state */ }
+  };
+
+  useEffect(() => {
+    // Fetch on mount
+    fetchProfile();
+
+    // Re-fetch whenever Profile.jsx fires the update event
+    window.addEventListener("chop8_profile_updated", fetchProfile);
+    return () => window.removeEventListener("chop8_profile_updated", fetchProfile);
+  }, []);
+
+  // If parent later passes a non-empty photo prop, use it
+  useEffect(() => {
+    if (photo) setLivePhoto(photo);
+  }, [photo]);
+
+  // Use live photo if available, else prop, else nothing
+  const displayPhoto = livePhoto || photo || "";
+
   const menuItems = [
     { name: "Home",       path: "/",          icon: <FaHome /> },
     { name: "Services",   path: "/services",  icon: <FaList /> },
@@ -26,7 +64,7 @@ function Sidebar({
     { name: "Contact Us", path: "/contactus", icon: <IoIosHelpCircle /> },
   ];
 
-  const stars = Math.min(5, Math.max(0, Math.round(Number(avgRating) || 0)));
+  const stars = Math.min(5, Math.max(0, Math.round(Number(liveAvgRating) || 0)));
 
   return (
     <div
@@ -41,8 +79,13 @@ function Sidebar({
         {/* Profile header */}
         <div className={styles.profileHeader}>
           <div className={styles.avatarRing}>
-            {photo ? (
-              <img src={photo} alt={username} className={styles.avatarImg} />
+            {displayPhoto ? (
+              <img
+                src={displayPhoto}
+                alt={username}
+                className={styles.avatarImg}
+                onError={() => setLivePhoto("")}  /* fallback if image fails */
+              />
             ) : (
               <div className={styles.avatarFallback}>
                 {isChef ? "👨‍🍳" : "👤"}
@@ -55,14 +98,14 @@ function Sidebar({
             {isChef && (
               <span className={styles.roleBadge}>👨‍🍳 Chef Account</span>
             )}
-            {ratingCount > 0 && (
+            {liveRatingCount > 0 && (
               <div className={styles.ratingRow}>
                 <span className={styles.stars}>
                   {"★".repeat(stars)}
                   <span className={styles.starsEmpty}>{"★".repeat(5 - stars)}</span>
                 </span>
                 <span className={styles.ratingNum}>
-                  {Number(avgRating).toFixed(1)} ({ratingCount})
+                  {Number(liveAvgRating).toFixed(1)} ({liveRatingCount})
                 </span>
               </div>
             )}
@@ -123,6 +166,7 @@ function Sidebar({
         <button className={styles.logout} onClick={onLogout}>
           🚪 Logout
         </button>
+
       </div>
     </div>
   );
